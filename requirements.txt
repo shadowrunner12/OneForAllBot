@@ -1,0 +1,6 @@
+kurigram
+tgcrypto
+httpx
+yt-dlp[default]
+gdown
+python-dotenv
