@@ -36,7 +36,7 @@
 روی سرور **Ubuntu 24.04** (یا Debian) این دستور رو بزن:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USER/tgbot/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/shadowrunner12/OneForAllBot/main/install.sh)
 ```
 
 منوی نصب باز می‌شه:
