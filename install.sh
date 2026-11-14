@@ -6,7 +6,7 @@
 # ──────────────────────────────────────────────────────────────
 set -uo pipefail
 
-REPO_SLUG="${REPO_SLUG:-YOUR_USER/tgbot}"
+REPO_SLUG="${REPO_SLUG:-shadowrunner12/OneForAllBot}"
 REPO_URL="${REPO_URL:-https://github.com/${REPO_SLUG}.git}"
 BRANCH="${BRANCH:-main}"
 SERVICE="tgbot"
