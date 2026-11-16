@@ -11,7 +11,7 @@ from pyrogram.types import InlineKeyboardMarkup as Markup
 
 import config
 import jobs
-from core import app, owner, state
+from core import app, owner, repos, state
 from handlers import cookies, manage
 from services import ytdlp
 from services.proc import run
@@ -34,7 +34,8 @@ HELP = (
     "📖 **راهنمای دستورها**\n\n"
     "**ارسال**\n"
     "• لینک یا فایل بفرست؛ نوعش رو خودم تشخیص می‌دم\n"
-    "• لینک پلی‌لیست یوتیوب ← بازه رو بنویس (مثلاً `1-10`)\n\n"
+    "• لینک پلی‌لیست یوتیوب ← بازه رو بنویس (مثلاً `1-10`)\n"
+    "• اگه ریپوی خصوصی تنظیم کرده باشی، موقع آپلود می‌پرسه عمومی یا خصوصی\n\n"
     "**گروهی**\n"
     "• `/batch نام` ← هر مورد جدا در یک Release\n"
     "• `/batch zip` ، `/batch zip نام` ، `/batch zip 1234 نام` ، `/batch zip -p 1234` ← همه در یک ZIP\n"
@@ -124,7 +125,7 @@ async def menu_cb(client, cb):
     if which == "status":
         await client.send_message(chat_id, await status_text())
     elif which == "files":
-        await manage.send_files(client, chat_id)
+        await manage.files_menu(client, chat_id)
     elif which == "cookies":
         await client.send_message(chat_id, cookies.cookie_help())
     elif which == "help":
@@ -177,8 +178,29 @@ async def done_cmd(client, message):
         f"⚙️ نوع: `{'ZIP یکپارچه' if zip_mode else 'هر مورد جدا در یک Release'}`\n\n"
         f"⏳ در صف انتظار..."
     )
+    if "private" in repos:
+        token = state.keep({"items": items, "title": title, "zip": zip_mode, "pwd": password})
+        kb = Markup([[
+            Btn("🌐 گیت‌هاب عمومی", callback_data=f"bt:{token}:public"),
+            Btn("🔒 گیت‌هاب خصوصی", callback_data=f"bt:{token}:private"),
+        ]])
+        return await message.reply_text(
+            preview.replace("⏳ در صف انتظار...", "📍 **روی کدوم ریپو آپلود بشه؟**"), reply_markup=kb
+        )
     status = Status(client, await message.reply_text(preview, reply_markup=cancel_kb()), state)
     await jobs.submit_batch(client, status, items, title, zip_mode, password)
+
+
+@app.on_callback_query(filters.regex(r"^bt:(\w+):(public|private)$") & owner)
+async def batch_repo_cb(client, cb):
+    token, repo = cb.matches[0].group(1, 2)
+    data = state.stash.pop(token, None)
+    if not data:
+        return await cb.answer("منقضی شده؛ دوباره /batch بزن.", show_alert=True)
+    await cb.answer()
+    await cb.message.edit_text("⏳ **در صف انتظار...**", reply_markup=cancel_kb())
+    status = Status(client, cb.message, state)
+    await jobs.submit_batch(client, status, data["items"], data["title"], data["zip"], data["pwd"], repo)
 
 
 @app.on_message(filters.command("zip") & owner)

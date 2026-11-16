@@ -12,10 +12,16 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID") or 0)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "")
+GITHUB_REPO_PRIVATE = os.getenv("GITHUB_REPO_PRIVATE", "")
+
+# سرور لینک دانلود برای ریپوی خصوصی (اختیاری)
+PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
+WEB_PORT = int(os.getenv("WEB_PORT") or 8080)
+LINK_TTL_HOURS = int(os.getenv("LINK_TTL_HOURS") or 72)
 
 DEFAULT_QUALITY = os.getenv("DEFAULT_QUALITY", "720")
 YT_CLIENTS = os.getenv("YT_CLIENTS", "")
-WORK_DIR = Path(os.getenv("WORK_DIR", "/tmp/tgbot"))
+WORK_DIR = Path(os.getenv("WORK_DIR") or "/tmp/tgbot")
 COOKIES_DIR = BASE_DIR / "cookies"
 
 PART_SIZE_MB = 1900

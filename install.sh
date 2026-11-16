@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────
 #  TG Leech Bot — installer / manager
-#  Run:  bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USER/tgbot/main/install.sh)
+#  Run:  bash <(curl -fsSL https://raw.githubusercontent.com/shadowrunner12/OneForAllBot/main/install.sh)
 #  Menu: install · update · edit config · uninstall
 # ──────────────────────────────────────────────────────────────
 set -uo pipefail
@@ -89,6 +89,7 @@ ask() {  # ask VAR "Label" "hint" regex secret(0|1)
       read -rp "  › ${name}${shown}: " val < "$TTY" || die "Input closed."
     fi
     val="${val:-$cur}"
+    [ "$val" = "-" ] && val=""
     if [[ "$val" =~ $regex ]]; then printf -v "$name" '%s' "$val"; return; fi
     warn "That value doesn't look right. Try again."
   done
@@ -104,11 +105,48 @@ collect_config() {
   ask ADMIN_ID "Your numeric Telegram user ID" "Send /start to @userinfobot to see it. Only this user can use the bot." '^[0-9]+$'
   ask GITHUB_TOKEN "GitHub token" "Classic token with 'repo' scope, or fine-grained with Contents: Read and write" '^[A-Za-z0-9_]{20,}$' 1
   ask GITHUB_REPO "GitHub repo for uploads (owner/name)" "Releases are created here. The repo needs at least one commit." '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
+  ask GITHUB_REPO_PRIVATE "PRIVATE GitHub repo for sensitive files (optional)" "Press Enter to skip (or '-' to remove). The bot will then ask public or private on each upload." '^$|^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
+  if [ -n "${GITHUB_REPO_PRIVATE:-}" ]; then
+    if [ -z "${PUBLIC_URL:-}" ]; then
+      local ip
+      ip=$(curl -fsS --max-time 5 https://checkip.amazonaws.com 2>/dev/null | tr -d '[:space:]')
+      if [ -n "$ip" ]; then PUBLIC_URL="http://${ip}:${WEB_PORT:-8080}"; fi
+    fi
+    ask PUBLIC_URL "Public URL for private download links (optional)" "Starts a small download server so IDM/mobile can fetch private files. Open TCP port ${WEB_PORT:-8080} in your cloud firewall (AWS Security Group). Type '-' to disable." '^$|^https?://[^ ]+$'
+  fi
+}
+
+check_repo() {  # check_repo owner/name public|private
+  local repo="$1" kind="$2" code tmp
+  tmp=$(mktemp)
+  code=$(curl -s -o "$tmp" -w '%{http_code}' --max-time 15 \
+    -H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/${repo}" || echo 000)
+  case "$code" in
+    200)
+      if python3 -c 'import sys,json; sys.exit(0 if json.load(open(sys.argv[1])).get("permissions",{}).get("push") else 1)' "$tmp" 2>/dev/null; then
+        ok "GitHub repo ${repo} is reachable and writable"
+      else
+        warn "Token can read ${repo} but may not be able to write to it."
+      fi
+      if [ "$kind" = private ] && ! python3 -c 'import sys,json; sys.exit(0 if json.load(open(sys.argv[1])).get("private") else 1)' "$tmp" 2>/dev/null; then
+        warn "${repo} is PUBLIC — files sent to the 'private' option would be visible to everyone!"
+        confirm "Continue anyway?" n || die "Aborted."
+      fi
+      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+        -H "Authorization: Bearer ${GITHUB_TOKEN}" "https://api.github.com/repos/${repo}/commits?per_page=1" || echo 000)
+      if [ "$code" = 409 ]; then warn "${repo} is empty — add a README commit first, or release creation will fail."; fi
+      ;;
+    401) warn "GitHub rejected the token (401)."; confirm "Continue anyway?" n || die "Aborted." ;;
+    404) warn "Repo ${repo} not found, or the token has no access to it."; confirm "Continue anyway?" n || die "Aborted." ;;
+    *)   warn "Could not verify ${repo} (HTTP ${code})." ;;
+  esac
+  rm -f "$tmp"
 }
 
 verify_config() {
   step "Checking credentials"
-  local resp name code tmp
+  local resp name
   resp=$(curl -fsS --max-time 15 "https://api.telegram.org/bot${BOT_TOKEN}/getMe" 2>/dev/null || true)
   if echo "$resp" | grep -q '"ok":true'; then
     name=$(echo "$resp" | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["username"])' 2>/dev/null || echo "?")
@@ -118,30 +156,12 @@ verify_config() {
     confirm "Continue anyway?" n || die "Aborted."
   fi
 
-  tmp=$(mktemp)
-  code=$(curl -s -o "$tmp" -w '%{http_code}' --max-time 15 \
-    -H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/repos/${GITHUB_REPO}" || echo 000)
-  case "$code" in
-    200)
-      if python3 -c 'import sys,json; sys.exit(0 if json.load(open(sys.argv[1])).get("permissions",{}).get("push") else 1)' "$tmp" 2>/dev/null; then
-        ok "GitHub repo ${GITHUB_REPO} is reachable and writable"
-      else
-        warn "Token can read ${GITHUB_REPO} but may not be able to write to it."
-      fi
-      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
-        -H "Authorization: Bearer ${GITHUB_TOKEN}" "https://api.github.com/repos/${GITHUB_REPO}/commits?per_page=1" || echo 000)
-      if [ "$code" = 409 ]; then warn "Repo is empty — add a README commit first, or release creation will fail."; fi
-      ;;
-    401) warn "GitHub rejected the token (401)."; confirm "Continue anyway?" n || die "Aborted." ;;
-    404) warn "Repo ${GITHUB_REPO} not found, or the token has no access to it."; confirm "Continue anyway?" n || die "Aborted." ;;
-    *)   warn "Could not verify GitHub (HTTP ${code})." ;;
-  esac
-  rm -f "$tmp"
+  check_repo "$GITHUB_REPO" public
+  if [ -n "${GITHUB_REPO_PRIVATE:-}" ]; then check_repo "$GITHUB_REPO_PRIVATE" private; fi
 }
 
 write_env() {
-  local quality="${DEFAULT_QUALITY:-720}" clients="${YT_CLIENTS:-}"
+  local quality="${DEFAULT_QUALITY:-720}" clients="${YT_CLIENTS:-}" workdir="${WORK_DIR:-}" webport="${WEB_PORT:-}" ttl="${LINK_TTL_HOURS:-}"
   ( umask 077
     cat > "$INSTALL_DIR/.env" <<ENV_FILE
 API_ID=${API_ID}
@@ -150,10 +170,15 @@ BOT_TOKEN=${BOT_TOKEN}
 ADMIN_ID=${ADMIN_ID}
 GITHUB_TOKEN=${GITHUB_TOKEN}
 GITHUB_REPO=${GITHUB_REPO}
+GITHUB_REPO_PRIVATE=${GITHUB_REPO_PRIVATE:-}
+PUBLIC_URL=${PUBLIC_URL:-}
 
 # optional
 DEFAULT_QUALITY=${quality}
 YT_CLIENTS=${clients}
+${workdir:+WORK_DIR=${workdir}}
+${webport:+WEB_PORT=${webport}}
+${ttl:+LINK_TTL_HOURS=${ttl}}
 ENV_FILE
   )
   chmod 600 "$INSTALL_DIR/.env"
@@ -225,6 +250,14 @@ install_service() {
   ok "Service '${SERVICE}' enabled · command 'tgbot' is now available"
 }
 
+open_firewall() {
+  [ -n "${PUBLIC_URL:-}" ] || return 0
+  if command -v ufw >/dev/null && $SUDO ufw status 2>/dev/null | grep -q "Status: active"; then
+    $SUDO ufw allow "${WEB_PORT:-8080}/tcp" >/dev/null && ok "ufw: opened port ${WEB_PORT:-8080}"
+  fi
+  info "Remember to allow inbound TCP ${WEB_PORT:-8080} in your cloud firewall (AWS: Security Group)."
+}
+
 restart_service() {
   $SUDO systemctl restart "$SERVICE"
   sleep 3
@@ -253,6 +286,7 @@ do_install() {
   write_env
   setup_python
   install_service
+  open_firewall
   step "Starting the bot"
   restart_service
   done_box
@@ -295,6 +329,7 @@ do_config() {
   collect_config
   verify_config
   write_env
+  open_firewall
   step "Restarting"
   restart_service
 }

@@ -1,6 +1,7 @@
 kurigram
 tgcrypto
 httpx
+aiohttp
 yt-dlp[default]
 gdown
 python-dotenv

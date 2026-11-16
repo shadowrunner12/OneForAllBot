@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pyrogram import StopTransmission
 
 import config
-from core import gh, state
+from core import repos, state
 from pipeline import Runner
 from state import Cancelled
 from ui import Status, fmt_time
@@ -42,19 +42,19 @@ async def _finish(status, outcome):
 
 async def _single(client, status, item, do_zip, password):
     async with slot(status, "job") as folder:
-        outcome = await Runner(client, state, gh, status).process(item, folder, do_zip, password)
+        outcome = await Runner(client, state, repos, status).process(item, folder, do_zip, password)
         await _finish(status, outcome)
 
 
-async def _batch(client, status, items, title, zip_mode, password):
+async def _batch(client, status, items, title, zip_mode, password, repo):
     async with slot(status, "batch") as folder:
-        outcome = await Runner(client, state, gh, status).batch(items, title, zip_mode, password, folder)
+        outcome = await Runner(client, state, repos, status).batch(items, title, zip_mode, password, folder, repo)
         await _finish(status, outcome)
 
 
-async def _playlist(client, status, entries, fmt, dest):
+async def _playlist(client, status, entries, fmt, dest, repo):
     async with slot(status, "pl") as folder:
-        await Runner(client, state, gh, status).playlist(entries, fmt, dest, folder)
+        await Runner(client, state, repos, status).playlist(entries, fmt, dest, repo, folder)
 
 
 async def _status(client, chat_id):
@@ -70,10 +70,10 @@ async def submit_single(client, chat_id, item):
     state.spawn(_single(client, status, item, do_zip, password))
 
 
-async def submit_batch(client, status, items, title, zip_mode, password):
-    state.spawn(_batch(client, status, items, title, zip_mode, password))
+async def submit_batch(client, status, items, title, zip_mode, password, repo="public"):
+    state.spawn(_batch(client, status, items, title, zip_mode, password, repo))
 
 
-async def submit_playlist(client, chat_id, entries, fmt, dest):
+async def submit_playlist(client, chat_id, entries, fmt, dest, repo="public"):
     status = await _status(client, chat_id)
-    state.spawn(_playlist(client, status, entries, fmt, dest))
+    state.spawn(_playlist(client, status, entries, fmt, dest, repo))

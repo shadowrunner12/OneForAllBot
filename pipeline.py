@@ -18,12 +18,19 @@ from utils.names import clean_name, code, human_size, short, with_ext
 class Runner:
     """یک کار کامل: دانلود ← نام‌گذاری ← (ZIP) ← ارسال در چت یا آپلود روی گیت‌هاب."""
 
-    def __init__(self, client, state, gh, status):
+    def __init__(self, client, state, repos, status):
         self.client = client
         self.state = state
-        self.gh = gh
+        self.repos = repos
+        self.gh = repos["public"]
         self.status = status
         self.chat_id = status.msg.chat.id
+
+    def use_repo(self, repo):
+        gh = self.repos.get(repo)
+        if gh is None:
+            raise RuntimeError("ریپوی خصوصی تنظیم نشده (GITHUB_REPO_PRIVATE). با tgbot config اضافه‌ش کن.")
+        self.gh = gh
 
     def _stop(self):
         return self.state.cancel
@@ -89,6 +96,7 @@ class Runner:
     # ---------- تحویل ----------
 
     async def process(self, item, folder, do_zip=False, password=None, context=None):
+        self.use_repo(item.repo)
         keys = ["download"]
         if item.dest == "chat":
             if item.gif:
@@ -161,7 +169,7 @@ class Runner:
         return files
 
     async def _upload_all(self, rel, files):
-        await self.status.goto("upload")
+        await self.status.goto("upload", self.gh.upload_label)
         for i, f in enumerate(files, 1):
             note = f"🧩 پارت {i} از {len(files)}" if len(files) > 1 else ""
             await rel.upload(f, progress=self.status.transfer(note))
@@ -174,7 +182,7 @@ class Runner:
         if do_zip or split:
             files = await self._zip([path], folder, path.name, password, split)
 
-        await self.status.goto("upload")
+        await self.status.goto("upload", self.gh.upload_label)
         await self.status.note("⚙️ در حال ساخت Release در گیت‌هاب...")
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         title = f"{path.name} | {now}"
@@ -186,7 +194,8 @@ class Runner:
 
     # ---------- گروهی ----------
 
-    async def batch(self, items, title, zip_mode, password, folder):
+    async def batch(self, items, title, zip_mode, password, folder, repo="public"):
+        self.use_repo(repo)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         release_title = f"📦 {title} | {now}"
         body = f"Batch release created on {now}\nTitle: {title} | Items: {len(items)}"
@@ -248,14 +257,15 @@ class Runner:
 
     # ---------- پلی‌لیست ----------
 
-    async def playlist(self, entries, fmt, dest, folder):
+    async def playlist(self, entries, fmt, dest, repo, folder):
         total = len(entries)
         done = 0
+        choice = "chat" if dest == "chat" else ("private" if repo == "private" else "github")
         for i, entry in enumerate(entries, 1):
             self._check()
             item = Item(
                 kind="url", url=f"https://www.youtube.com/watch?v={entry['id']}",
-                name=entry["title"], fmt=fmt, dest=dest,
+                name=entry["title"], fmt=fmt, dest=dest, repo=repo,
             )
             item_dir = folder / f"v{i}"
             try:
@@ -267,7 +277,7 @@ class Runner:
             except (Cancelled, StopTransmission):
                 raise
             except Exception as e:
-                retry = Markup([[Btn("🔄 دوباره امتحان کن", callback_data=f"r:{entry['id']}:{fmt}:{dest}")]])
+                retry = Markup([[Btn("🔄 دوباره امتحان کن", callback_data=f"r:{entry['id']}:{fmt}:{choice}")]])
                 await self.client.send_message(
                     self.chat_id, f"❌ **({i}/{total}) خطا**\n{explain(e)}", reply_markup=retry
                 )

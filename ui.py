@@ -52,17 +52,19 @@ def cancel_kb():
     return Markup([[Btn("✖️ لغو عملیات", callback_data="cancel_task")]])
 
 
-def manage_kb(link, release_id, asset_id, page_url):
-    rows = [
-        [Btn("⬇️ دانلود مستقیم", url=link), Btn("🌐 صفحه Release", url=page_url)],
-    ]
+def manage_kb(link, release_id, asset_id, page_url, key="public"):
+    if key == "private":
+        data = f"lk_{key}_{asset_id}" if asset_id else f"lka_{key}_{release_id}"
+        rows = [[Btn("🔗 لینک دانلود", callback_data=data), Btn("🌐 صفحه Release", url=page_url)]]
+    else:
+        rows = [[Btn("⬇️ دانلود مستقیم", url=link), Btn("🌐 صفحه Release", url=page_url)]]
     if asset_id:
         rows.append([
-            Btn("✏️ تغییر نام", callback_data=f"ren_{asset_id}"),
-            Btn("🗑 حذف", callback_data=f"del_{release_id}"),
+            Btn("✏️ تغییر نام", callback_data=f"ren_{key}_{asset_id}"),
+            Btn("🗑 حذف", callback_data=f"del_{key}_{release_id}"),
         ])
     else:
-        rows.append([Btn("🗑 حذف کل Release", callback_data=f"del_{release_id}")])
+        rows.append([Btn("🗑 حذف کل Release", callback_data=f"del_{key}_{release_id}")])
     return Markup(rows)
 
 
@@ -242,28 +244,37 @@ def release_outcome(title, rel, links_url, size, password=None, note="", failed=
         failed_text = "\n\n⚠️ **موارد ردشده**\n" + "\n".join(f"• `{code(f)}`" for f in failed)
     assets = rel.assets
 
+    private = rel.gh.key == "private"
     if len(assets) == 1:
         a = assets[0]
+        link_block = (
+            "🔒 فایل توی ریپوی خصوصیه؛ برای IDM یا موبایل دکمه‌ی «لینک دانلود» رو بزن."
+            if private else f"🔗 **لینک مستقیم** (برای کپی لمسش کن)\n`{a.url}`"
+        )
         text = (
             f"✅ **آپلود روی گیت‌هاب کامل شد**{note}\n\n"
             f"📄 `{code(a.name)}`\n"
-            f"📦 `{human_size(a.size)}`{pw}\n\n"
-            f"🔗 **لینک مستقیم** (برای کپی لمسش کن)\n`{a.url}`"
+            f"📦 `{human_size(a.size)}`{pw}\n"
+            f"{rel.gh.mark} `{code(rel.gh.repo)}`\n\n"
+            f"{link_block}"
             f"{failed_text}"
         )
-        return Outcome(text, manage_kb(a.url, rel.id, a.id, rel.page))
+        return Outcome(text, manage_kb(a.url, rel.id, a.id, rel.page, rel.gh.key))
 
     lines = [
         f"✅ **{len(assets)} فایل روی گیت‌هاب آپلود شد**{note}",
         "",
         f"🏷 `{code(title)}`",
+        f"{rel.gh.mark} `{code(rel.gh.repo)}`",
         f"📦 مجموع: `{human_size(size)}`{pw}",
     ]
     if any(re.search(r"\.zip(\.\d+)?$", a.name) for a in assets):
         lines += ["", "💡 همه پارت‌ها رو کنار هم بریز و فایل اول (`.zip` یا `.zip.001`) رو با WinRAR یا 7-Zip باز کن."]
     lines.append("")
     for i, a in enumerate(assets, 1):
-        lines.append(f"**{i}.** `{code(a.name)}` · `{human_size(a.size)}`\n`{a.url}`")
+        lines.append(f"**{i}.** `{code(a.name)}` · `{human_size(a.size)}`" + ("" if private else f"\n`{a.url}`"))
+    if private:
+        lines += ["", "🔒 فایل‌ها توی ریپوی خصوصی‌ان؛ دکمه‌ی «لینک دانلود» لینک همه‌ی پارت‌ها رو می‌ده."]
     if links_url:
         lines += ["", f"📋 **لیست همه لینک‌ها (برای IDM)**\n`{links_url}`"]
-    return Outcome("\n".join(lines) + failed_text, manage_kb(assets[0].url, rel.id, None, rel.page))
+    return Outcome("\n".join(lines) + failed_text, manage_kb(assets[0].url, rel.id, None, rel.page, rel.gh.key))

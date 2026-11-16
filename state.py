@@ -20,6 +20,7 @@ class Item:
     url: str | None = None
     fmt: str | None = None         # 720 / audio / best
     dest: str = "github"           # github یا chat
+    repo: str = "public"           # public یا private
     gif: bool = False
 
 

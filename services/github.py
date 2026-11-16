@@ -72,7 +72,7 @@ class Release:
 
     async def upload_links(self, folder):
         """فایل links.txt برای دانلود یکجا (مثلاً با IDM)؛ فقط وقتی بیشتر از یک فایل داریم."""
-        if len(self.assets) <= 1:
+        if len(self.assets) <= 1 or self.gh.key == "private":
             return None
         path = Path(folder) / "links.txt"
         path.write_text("\n".join(a.url for a in self.assets) + "\n", encoding="utf-8")
@@ -82,8 +82,11 @@ class Release:
 
 
 class GitHub:
-    def __init__(self, token, repo):
+    def __init__(self, token, repo, key="public"):
         self.repo = repo
+        self.key = key
+        self.mark = "🔒" if key == "private" else "🌐"
+        self.upload_label = f"آپلود روی گیت‌هاب {self.mark}"
         self.headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
@@ -123,6 +126,29 @@ class GitHub:
             if resp.status_code != 200:
                 raise RuntimeError(f"خطا در ارتباط با گیت‌هاب: {resp.status_code}")
             return resp.json()
+
+    async def asset(self, asset_id):
+        async with httpx.AsyncClient(timeout=30) as http:
+            resp = await http.get(f"{API}/repos/{self.repo}/releases/assets/{asset_id}", headers=self.headers)
+            if resp.status_code != 200:
+                raise RuntimeError(f"فایل پیدا نشد ({resp.status_code})")
+            return resp.json()
+
+    async def release_assets(self, release_id):
+        async with httpx.AsyncClient(timeout=30) as http:
+            resp = await http.get(f"{API}/repos/{self.repo}/releases/{release_id}", headers=self.headers)
+            if resp.status_code != 200:
+                raise RuntimeError(f"Release پیدا نشد ({resp.status_code})")
+            return resp.json().get("assets", [])
+
+    async def signed_url(self, asset_id):
+        """لینک امضاشده‌ی کوتاه‌مدت گیت‌هاب برای دانلود فایل ریپوی خصوصی (بدون نیاز به توکن)."""
+        headers = {**self.headers, "Accept": "application/octet-stream"}
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as http:
+            resp = await http.get(f"{API}/repos/{self.repo}/releases/assets/{asset_id}", headers=headers)
+            if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get("location"):
+                return resp.headers["location"]
+            raise RuntimeError(f"گرفتن لینک دانلود ناموفق بود ({resp.status_code})")
 
     async def rename_asset(self, asset_id, name):
         async with httpx.AsyncClient(timeout=30) as http:

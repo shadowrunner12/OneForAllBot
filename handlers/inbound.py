@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pyrogram import filters
 
-from core import app, gh, owner, state
+from core import app, owner, repos, state
 import jobs
 from handlers import cookies, menus
 from services import ytdlp
@@ -25,7 +25,7 @@ async def handle_url(client, message, url, custom):
     if ytdlp.platform_of(url) != "other":
         return await menus.offer(client, message, url, name)
 
-    await jobs.submit_single(client, message.chat.id, Item(kind="url", url=url, custom_name=name))
+    await menus.ask_target(message, Item(kind="url", url=url, custom_name=name))
 
 
 def tg_item(message, custom=None):
@@ -57,6 +57,8 @@ async def on_media(client, message):
             f"مورد بعدی رو بفرست یا /done بزن (/pop آخرین مورد رو حذف می‌کنه)"
         )
 
+    if "private" in repos:
+        return await menus.ask_target(message, item, chat=False)
     await jobs.submit_single(client, message.chat.id, item)
 
 
@@ -69,10 +71,11 @@ async def on_text(client, message):
 
     # تغییر نام فایل روی گیت‌هاب
     if state.rename_asset and not first.startswith("http"):
-        asset_id, state.rename_asset = state.rename_asset, None
+        key, asset_id = state.rename_asset
+        state.rename_asset = None
         new_name = clean_name(first)
         try:
-            data = await gh.rename_asset(asset_id, new_name)
+            data = await repos[key].rename_asset(asset_id, new_name)
         except Exception as e:
             return await message.reply_text(f"❌ {e}")
         return await message.reply_text(

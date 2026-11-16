@@ -6,13 +6,45 @@ from pyrogram.types import InlineKeyboardMarkup as Markup
 
 import config
 import jobs
-from core import app, owner, state
+from core import app, owner, repos, state
 from services import ytdlp
 from state import Item, Menu
 from utils.errors import explain
 from utils.names import code
 
 RANGE = re.compile(r"^(\d+)(?:\s*-\s*(\d+))?$")
+
+
+def target(choice):
+    """(مقصد، ریپو، GIF؟) از روی گزینه‌ی دکمه."""
+    dest = "chat" if choice in ("chat", "gif") else "github"
+    repo = "private" if choice == "private" else "public"
+    return dest, repo, choice == "gif"
+
+
+def dest_kb(make_data, chat=True, gif=False):
+    """دکمه‌های انتخاب مقصد؛ گزینه‌ی ریپوی خصوصی فقط وقتی تنظیم شده باشه نمایش داده می‌شه."""
+    rows = []
+    if chat:
+        rows.append([Btn("📤 ارسال در چت", callback_data=make_data("chat"))])
+    if "private" in repos:
+        rows.append([Btn("🌐 گیت‌هاب عمومی", callback_data=make_data("github"))])
+        rows.append([Btn("🔒 گیت‌هاب خصوصی", callback_data=make_data("private"))])
+    else:
+        rows.append([Btn("☁️ آپلود روی گیت‌هاب", callback_data=make_data("github"))])
+    if gif:
+        rows.append([Btn(f"🎞 GIF ({config.GIF_MAX_SECONDS} ثانیه اول)", callback_data=make_data("gif"))])
+    return Markup(rows)
+
+
+async def ask_target(message, item, chat=True):
+    """پیش از آپلود می‌پرسد کجا برود (چت / ریپوی عمومی / ریپوی خصوصی)."""
+    token = state.keep(item)
+    label = item.custom_name or item.name or item.url or ""
+    await message.reply_text(
+        f"📍 **کجا آپلود کنم؟**\n`{code(label[:80])}`",
+        reply_markup=dest_kb(lambda c: f"s:{token}:{c}", chat=chat),
+    )
 
 
 async def _edit_any(message, text, kb):
@@ -81,17 +113,12 @@ async def pick_quality(client, cb):
     menu = state.menus.get(token)
     if not menu:
         return await cb.answer("این منو منقضی شده، لینک رو دوباره بفرست.", show_alert=True)
-    rows = [
-        [Btn("📤 ارسال در چت", callback_data=f"d:{token}:{fmt}:chat")],
-        [Btn("☁️ آپلود روی گیت‌هاب", callback_data=f"d:{token}:{fmt}:github")],
-    ]
-    if fmt != "audio" and not menu.entries:
-        rows.append([Btn(f"🎞 GIF ({config.GIF_MAX_SECONDS} ثانیه اول)", callback_data=f"d:{token}:{fmt}:gif")])
+    kb = dest_kb(lambda c: f"d:{token}:{fmt}:{c}", chat=True, gif=fmt != "audio" and not menu.entries)
     await cb.answer()
-    await _edit_any(cb.message, f"🎬 **{code(menu.title)}**\n\nمقصد رو انتخاب کن 👇", Markup(rows))
+    await _edit_any(cb.message, f"🎬 **{code(menu.title)}**\n\nمقصد رو انتخاب کن 👇", kb)
 
 
-@app.on_callback_query(filters.regex(r"^d:(\w+):(\w+):(chat|github|gif)$") & owner)
+@app.on_callback_query(filters.regex(r"^d:(\w+):(\w+):(chat|github|private|gif)$") & owner)
 async def pick_destination(client, cb):
     token, fmt, choice = cb.matches[0].group(1, 2, 3)
     menu = state.menus.pop(token, None)
@@ -104,19 +131,35 @@ async def pick_destination(client, cb):
     except Exception:
         pass
 
-    dest = "chat" if choice == "gif" else choice
+    dest, repo, gif = target(choice)
     if menu.entries:
-        return await jobs.submit_playlist(client, chat_id, menu.entries, fmt, dest)
+        return await jobs.submit_playlist(client, chat_id, menu.entries, fmt, dest, repo)
     item = Item(
-        kind="url", url=menu.url, name=menu.title, fmt=fmt, dest=dest,
-        gif=choice == "gif", custom_name=menu.name,
+        kind="url", url=menu.url, name=menu.title, fmt=fmt, dest=dest, repo=repo,
+        gif=gif, custom_name=menu.name,
     )
     await jobs.submit_single(client, chat_id, item)
 
 
-@app.on_callback_query(filters.regex(r"^r:([\w-]+):(\w+):(chat|github)$") & owner)
+@app.on_callback_query(filters.regex(r"^r:([\w-]+):(\w+):(chat|github|private)$") & owner)
 async def retry_video(client, cb):
-    vid, fmt, dest = cb.matches[0].group(1, 2, 3)
+    vid, fmt, choice = cb.matches[0].group(1, 2, 3)
     await cb.answer("دوباره تلاش می‌کنم...")
-    item = Item(kind="url", url=f"https://www.youtube.com/watch?v={vid}", fmt=fmt, dest=dest)
+    dest, repo, _ = target(choice)
+    item = Item(kind="url", url=f"https://www.youtube.com/watch?v={vid}", fmt=fmt, dest=dest, repo=repo)
+    await jobs.submit_single(client, cb.message.chat.id, item)
+
+
+@app.on_callback_query(filters.regex(r"^s:(\w+):(chat|github|private)$") & owner)
+async def pick_target(client, cb):
+    token, choice = cb.matches[0].group(1, 2)
+    item = state.stash.pop(token, None)
+    if item is None:
+        return await cb.answer("این منو منقضی شده، دوباره بفرست.", show_alert=True)
+    await cb.answer()
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+    item.dest, item.repo, _ = target(choice)
     await jobs.submit_single(client, cb.message.chat.id, item)

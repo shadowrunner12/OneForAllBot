@@ -17,5 +17,7 @@ app = Client(
     max_concurrent_transmissions=4,
 )
 state = State()
-gh = GitHub(config.GITHUB_TOKEN, config.GITHUB_REPO)
+repos = {"public": GitHub(config.GITHUB_TOKEN, config.GITHUB_REPO)}
+if config.GITHUB_REPO_PRIVATE:
+    repos["private"] = GitHub(config.GITHUB_TOKEN, config.GITHUB_REPO_PRIVATE, "private")
 owner = filters.user(config.ADMIN_ID)
